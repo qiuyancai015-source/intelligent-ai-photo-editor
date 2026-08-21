@@ -1,0 +1,8 @@
+{
+  "name": "Remix 智能AI修图大师",
+  "description": "专业一站式AI修图工具：一键抠图换背景、智能消除笔去水印与路人、添加防盗水印、证件照换底色、滤镜调色与高精导出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
