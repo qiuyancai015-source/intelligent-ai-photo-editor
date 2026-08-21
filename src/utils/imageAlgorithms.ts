@@ -39,9 +39,10 @@ export async function removeBackgroundSmart(
     edgeSmooth?: number;
     edgeExpansion?: number;
     useAiServer?: boolean;
+    onProgress?: (message: string) => void;
   } = {}
 ): Promise<{ cutoutDataUrl: string; maskDataUrl: string }> {
-  const { sensitivity = 35, featherRadius = 0, edgeExpansion = 0, useAiServer = true } = options;
+  const { sensitivity = 35, featherRadius = 0, edgeExpansion = 0, useAiServer = true, onProgress } = options;
 
   const img = await resolveImage(imageSource);
   const width = img.naturalWidth || img.width;
@@ -55,11 +56,26 @@ export async function removeBackgroundSmart(
     try {
       const { removeBackground } = await import("@imgly/background-removal");
       const source = typeof imageSource === "string" ? imageSource : await imageElementToBlob(img);
-      const resultBlob = await removeBackground(source, {
-        model: "isnet_fp16",
+      const localModelPath = new URL("./imgly/", window.location.href).toString();
+      const aiCutout = removeBackground(source, {
+        // Host the compact model with the app. The previous 88 MB model was
+        // fetched from a third-party CDN that is unreachable on some networks.
+        publicPath: localModelPath,
+        model: "isnet_quint8",
         device: "cpu",
+        progress: (key: string, current: number, total: number) => {
+          if (key.startsWith("fetch:") && total > 0) {
+            onProgress?.(`首次加载抠图模型 ${Math.min(100, Math.round((current / total) * 100))}%（之后会自动缓存）`);
+          } else if (key === "compute:inference") {
+            onProgress?.("模型加载完成，正在识别主体边缘...");
+          }
+        },
         output: { format: "image/png", quality: 1 },
       });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("本地抠图模型加载超时")), 120_000);
+      });
+      const resultBlob = await Promise.race([aiCutout, timeout]);
       const semanticUrl = await blobToDataUrl(resultBlob);
       const semanticImg = await resolveImage(semanticUrl);
       const semanticCanvas = document.createElement("canvas");

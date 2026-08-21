@@ -411,6 +411,7 @@ export default function App() {
         featherRadius: targetFeather,
         edgeSmooth: typeof cutoutConfig.edgeSmooth === "number" ? cutoutConfig.edgeSmooth : 2,
         edgeExpansion: typeof cutoutConfig.edgeExpansion === "number" ? cutoutConfig.edgeExpansion : 0,
+        onProgress: setProcessingText,
       });
 
       const nextCutoutConfig: CutoutConfig = {
