@@ -104,10 +104,11 @@ export async function removeBackgroundSmart(
       const semanticMaskPixels = semanticMaskCtx.createImageData(width, height);
 
       // IS-Net can assign zero confidence to an entire pale sleeve or a raised
-      // arm separated from the torso. Build a conservative colour-edge mask
-      // and use it only to restore *components that overlap the semantic
-      // subject*. This recovers omitted limbs/clothes from original pixels
-      // without bringing isolated background regions back.
+      // arm separated from the torso. Build a conservative colour-edge mask,
+      // then restore only pixels whose colours are better supported by the
+      // known semantic foreground than by the known outer background. A
+      // component-level union is unsafe here: a sleeve can be connected to a
+      // large patch of untouched backdrop and bring that whole patch back.
       onProgress?.("正在核对并找回被误删的手臂、衣袖与主体细节...");
       const recoveryResult = await removeBackgroundSmart(imageSource, {
         sensitivity,
@@ -123,22 +124,161 @@ export async function removeBackgroundSmart(
       recoveryCtx.drawImage(recoveryMaskImg, 0, 0, width, height);
       const recoveryPixels = recoveryCtx.getImageData(0, 0, width, height).data;
       const total = width * height;
-      const visited = new Uint8Array(total);
       const recoverable = new Uint8Array(total);
+      const colourBins = 16;
+      const colourBinCount = colourBins ** 3;
+      const backgroundBins = new Uint8Array(colourBinCount);
+      let minSubjectX = width, minSubjectY = height, maxSubjectX = 0, maxSubjectY = 0;
 
+      const colourBin = (p: number) =>
+        ((originalPixels.data[p] >> 4) << 8) |
+        ((originalPixels.data[p + 1] >> 4) << 4) |
+        (originalPixels.data[p + 2] >> 4);
+
+      // First find the reliable semantic subject bounds and its colour set.
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        if (semanticPixels.data[p + 3] < 224) continue;
+        const x = i % width, y = Math.floor(i / width);
+        minSubjectX = Math.min(minSubjectX, x); maxSubjectX = Math.max(maxSubjectX, x);
+        minSubjectY = Math.min(minSubjectY, y); maxSubjectY = Math.max(maxSubjectY, y);
+      }
+
+      const padX = Math.max(12, Math.round((maxSubjectX - minSubjectX + 1) * 0.35));
+      const padY = Math.max(12, Math.round((maxSubjectY - minSubjectY + 1) * 0.35));
+      const recoveryMinX = Math.max(0, minSubjectX - padX);
+      const recoveryMaxX = Math.min(width - 1, maxSubjectX + padX);
+      const recoveryMinY = Math.max(0, minSubjectY - padY);
+      const recoveryMaxY = Math.min(height - 1, maxSubjectY + padY);
+
+      // Learn background colours only outside the padded subject envelope.
+      // This prevents a fully missed green hand or white sleeve from teaching
+      // the classifier that its own colour is background.
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        if (semanticPixels.data[p + 3] > 2 || recoveryPixels[p] > 16) continue;
+        const x = i % width, y = Math.floor(i / width);
+        if (x < recoveryMinX || x > recoveryMaxX || y < recoveryMinY || y > recoveryMaxY) {
+          backgroundBins[colourBin(p)] = 1;
+        }
+      }
+
+      // Multi-source BFS over the small RGB cube gives a cheap nearest-palette
+      // distance for every colour (Manhattan distance in quantised RGB).
+      const paletteDistance = (seeds: Uint8Array) => {
+        const distance = new Uint8Array(colourBinCount);
+        distance.fill(255);
+        const queue = new Uint16Array(colourBinCount);
+        let head = 0, tail = 0;
+        for (let i = 0; i < colourBinCount; i++) {
+          if (seeds[i]) { distance[i] = 0; queue[tail++] = i; }
+        }
+        while (head < tail) {
+          const bin = queue[head++];
+          const r = bin >> 8, g = (bin >> 4) & 15, b = bin & 15;
+          const nextDistance = distance[bin] + 1;
+          const visit = (next: number) => {
+            if (distance[next] <= nextDistance) return;
+            distance[next] = nextDistance;
+            queue[tail++] = next;
+          };
+          if (r > 0) visit(bin - 256); if (r < 15) visit(bin + 256);
+          if (g > 0) visit(bin - 16); if (g < 15) visit(bin + 16);
+          if (b > 0) visit(bin - 1); if (b < 15) visit(bin + 1);
+        }
+        return distance;
+      };
+      const backgroundDistance = paletteDistance(backgroundBins);
+
+      // Fill small enclosed holes in the local shape mask. They are typically
+      // sleeves or collars punched out by pale, background-like highlights.
+      // Boundary-connected background stays open, and beige-like enclosed
+      // gaps are rejected by the background-colour evidence.
+      const recoverySolid = new Uint8Array(total);
+      for (let i = 0; i < total; i++) recoverySolid[i] = recoveryPixels[i * 4] >= 224 ? 1 : 0;
+      const visitedHole = new Uint8Array(total);
       for (let seed = 0; seed < total; seed++) {
-        if (visited[seed] || recoveryPixels[seed * 4] < 224) continue;
-        const component: number[] = [];
+        if (recoverySolid[seed] || visitedHole[seed]) continue;
+        const hole: number[] = [];
         const queue = [seed];
-        visited[seed] = 1;
-        let head = 0;
-        let overlapsSemanticSubject = false;
+        visitedHole[seed] = 1;
+        let head = 0, touchesOuterEdge = false, nonBackground = 0;
         while (head < queue.length) {
           const idx = queue[head++];
+          const x = idx % width, y = Math.floor(idx / width);
+          hole.push(idx);
+          if (x === 0 || y === 0 || x + 1 === width || y + 1 === height) touchesOuterEdge = true;
+          if (backgroundDistance[colourBin(idx * 4)] >= 3) nonBackground++;
+          const neighbours = [x > 0 ? idx - 1 : -1, x + 1 < width ? idx + 1 : -1,
+            y > 0 ? idx - width : -1, y + 1 < height ? idx + width : -1];
+          for (const next of neighbours) {
+            if (next >= 0 && !recoverySolid[next] && !visitedHole[next]) {
+              visitedHole[next] = 1;
+              queue.push(next);
+            }
+          }
+        }
+        if (!touchesOuterEdge && hole.length <= total * 0.035 && nonBackground / hole.length > 0.28) {
+          for (const idx of hole) recoverySolid[idx] = 1;
+        }
+      }
+
+      // Close semantic holes only where the local edge mask agrees. Limiting
+      // this expansion to 12 pixels fills broken sleeves/collars but cannot
+      // reach a broad background island accidentally retained by the local
+      // mask.
+      const distanceToSemantic = new Uint8Array(total);
+      distanceToSemantic.fill(255);
+      const distanceQueue = new Uint32Array(total);
+      let distanceHead = 0, distanceTail = 0;
+      for (let i = 0; i < total; i++) {
+        if (semanticPixels.data[i * 4 + 3] >= 96) {
+          distanceToSemantic[i] = 0;
+          distanceQueue[distanceTail++] = i;
+        }
+      }
+      while (distanceHead < distanceTail) {
+        const idx = distanceQueue[distanceHead++];
+        const distance = distanceToSemantic[idx];
+        if (distance >= 12) continue;
+        const x = idx % width, y = Math.floor(idx / width);
+        const neighbours = [x > 0 ? idx - 1 : -1, x + 1 < width ? idx + 1 : -1,
+          y > 0 ? idx - width : -1, y + 1 < height ? idx + width : -1];
+        for (const next of neighbours) {
+          if (next < 0 || distanceToSemantic[next] <= distance + 1) continue;
+          distanceToSemantic[next] = distance + 1;
+          distanceQueue[distanceTail++] = next;
+        }
+      }
+      for (let i = 0; i < total; i++) {
+        const p = i * 4;
+        if (semanticPixels.data[p + 3] < 224 && recoverySolid[i] &&
+          distanceToSemantic[i] <= 12 && backgroundDistance[colourBin(p)] >= 3) {
+          recoverable[i] = 255;
+        }
+      }
+
+      // Restore a fully missed detached limb as one coherent local-mask
+      // component. It must sit inside the padded subject envelope and contain
+      // plenty of colours far away from the learned background palette. This
+      // accepts the green raised arm while rejecting flat beige islands.
+      const visitedRecovery = new Uint8Array(total);
+      for (let seed = 0; seed < total; seed++) {
+        if (visitedRecovery[seed] || !recoverySolid[seed]) continue;
+        const component: number[] = [];
+        const queue = [seed];
+        visitedRecovery[seed] = 1;
+        let head = 0, strongForeground = 0, semanticOverlap = 0;
+        let componentMinX = width, componentMinY = height, componentMaxX = 0, componentMaxY = 0;
+        while (head < queue.length) {
+          const idx = queue[head++];
+          const p = idx * 4;
+          const x = idx % width, y = Math.floor(idx / width);
           component.push(idx);
-          if (semanticPixels.data[idx * 4 + 3] >= 96) overlapsSemanticSubject = true;
-          const x = idx % width;
-          const y = Math.floor(idx / width);
+          componentMinX = Math.min(componentMinX, x); componentMaxX = Math.max(componentMaxX, x);
+          componentMinY = Math.min(componentMinY, y); componentMaxY = Math.max(componentMaxY, y);
+          if (backgroundDistance[colourBin(p)] >= 5) strongForeground++;
+          if (semanticPixels.data[p + 3] >= 96) semanticOverlap++;
           const neighbours = [
             x > 0 ? idx - 1 : -1,
             x + 1 < width ? idx + 1 : -1,
@@ -146,24 +286,46 @@ export async function removeBackgroundSmart(
             y + 1 < height ? idx + width : -1,
           ];
           for (const next of neighbours) {
-            if (next >= 0 && !visited[next] && recoveryPixels[next * 4] >= 224) {
-              visited[next] = 1;
+            if (next >= 0 && !visitedRecovery[next] && recoverySolid[next]) {
+              visitedRecovery[next] = 1;
               queue.push(next);
             }
           }
         }
-        if (overlapsSemanticSubject) {
-          for (const idx of component) recoverable[idx] = 1;
+        const insideEnvelope = componentMinX >= recoveryMinX && componentMaxX <= recoveryMaxX &&
+          componentMinY >= recoveryMinY && componentMaxY <= recoveryMaxY;
+        const isDetachedMiss = semanticOverlap / component.length < 0.08;
+        const hasSubjectColours = strongForeground / component.length > 0.32;
+        const usefulArea = component.length > total * 0.001;
+        if (insideEnvelope && isDetachedMiss && hasSubjectColours && usefulArea) {
+          for (const idx of component) recoverable[idx] = 255;
         }
       }
 
       for (let i = 0; i < width * height; i++) {
         const p = i * 4;
-        const semanticAlpha = semanticPixels.data[p + 3];
+        let semanticAlpha = semanticPixels.data[p + 3];
+        // Partial alpha belongs only on the outer matte. Inside the subject,
+        // an all-nonzero 3x3 neighbourhood is semantic foreground and should
+        // remain opaque (white sleeves/collars must not turn smoky grey).
+        if (semanticAlpha >= 24 && semanticAlpha < 244) {
+          const x = i % width, y = Math.floor(i / width);
+          if (x > 0 && x + 1 < width && y > 0 && y + 1 < height) {
+            let interior = true;
+            for (let oy = -1; oy <= 1 && interior; oy++) {
+              for (let ox = -1; ox <= 1; ox++) {
+                if (semanticPixels.data[((y + oy) * width + x + ox) * 4 + 3] < 8) {
+                  interior = false; break;
+                }
+              }
+            }
+            if (interior) semanticAlpha = 255;
+          }
+        }
         // Preserve good semantic soft edges. Only replace pixels that the
         // model made virtually transparent inside a verified subject region.
-        const alpha = semanticAlpha < 24 && recoverable[i]
-          ? recoveryPixels[p]
+        const alpha = semanticAlpha < 224 && recoverable[i]
+          ? Math.max(semanticAlpha, recoverable[i])
           : semanticAlpha;
         originalPixels.data[p + 3] = alpha;
         semanticMaskPixels.data[p] = alpha;
