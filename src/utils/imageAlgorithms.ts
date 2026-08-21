@@ -56,10 +56,11 @@ export async function removeBackgroundSmart(
     try {
       const { removeBackground } = await import("@imgly/background-removal");
       const source = typeof imageSource === "string" ? imageSource : await imageElementToBlob(img);
-      const localModelPath = new URL("./imgly/", window.location.href).toString();
+      // Version the directory so browsers that previously cached the compact
+      // model can never reuse it for this high-quality pipeline.
+      const localModelPath = new URL("./imgly-fp16-v2/", window.location.href).toString();
       const aiCutout = removeBackground(source, {
-        // Host the compact model with the app. The previous 88 MB model was
-        // fetched from a third-party CDN that is unreachable on some networks.
+        // Host the model with the app instead of an unreachable third-party CDN.
         publicPath: localModelPath,
         // FP16 preserves fine knit fibres and dark/red shoe edges much better
         // than the compact quantized model, while still being self-hosted.
@@ -75,7 +76,8 @@ export async function removeBackgroundSmart(
         output: { format: "image/png", quality: 1 },
       });
       const timeout = new Promise<never>((_, reject) => {
-        window.setTimeout(() => reject(new Error("本地抠图模型加载超时")), 120_000);
+        // Slow connections may need several minutes for the first 84 MB load.
+        window.setTimeout(() => reject(new Error("高质量抠图模型加载超时")), 600_000);
       });
       const resultBlob = await Promise.race([aiCutout, timeout]);
       const semanticUrl = await blobToDataUrl(resultBlob);
@@ -116,7 +118,10 @@ export async function removeBackgroundSmart(
         maskDataUrl: semanticMask.toDataURL("image/png"),
       };
     } catch (error) {
-      console.warn("Semantic cutout unavailable; using fallback matting:", error);
+      // Do not silently return the low-precision colour flood-fill result. It
+      // can remove red/dark product pixels and look like a successful cutout.
+      console.error("High-quality semantic cutout failed:", error);
+      throw new Error("高质量抠图模型未能完整加载，请刷新页面后重试，并保持网络连接稳定。", { cause: error });
     }
   }
 

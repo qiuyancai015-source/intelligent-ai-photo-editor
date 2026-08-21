@@ -438,6 +438,9 @@ export default function App() {
       });
     } catch (err) {
       console.error("Cutout error:", err);
+      // Restore the pre-cutout background selection because no valid edit was produced.
+      setBgConfig(bgConfig);
+      window.alert(err instanceof Error ? err.message : "抠图失败，请刷新页面后重试。");
     } finally {
       setIsProcessing(false);
     }
