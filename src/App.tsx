@@ -211,6 +211,28 @@ export default function App() {
     ]
   );
 
+  // Parameter-only edits must also be first-class undo steps. Previously the
+  // UI updated the background immediately but never appended it to history,
+  // so Undo skipped all color choices and jumped back to the cutout/import.
+  const handleUpdateBgConfig = useCallback(
+    (cfg: Partial<BgConfig>) => {
+      const nextBgConfig: BgConfig = { ...bgConfig, ...cfg };
+      if (JSON.stringify(nextBgConfig) === JSON.stringify(bgConfig)) return;
+
+      setBgConfig(nextBgConfig);
+      const title =
+        nextBgConfig.type === "transparent"
+          ? "切换透明背景"
+          : nextBgConfig.type === "color"
+            ? `更换背景色 ${nextBgConfig.color.toUpperCase()}`
+            : nextBgConfig.type === "gradient"
+              ? "更换渐变背景"
+              : "更换场景背景";
+      pushHistorySnapshot(title, { bgConfig: nextBgConfig });
+    },
+    [bgConfig, pushHistorySnapshot]
+  );
+
   // Load a new image file
   const handleLoadImage = (fileOrUrl: File | string, titleHint?: string) => {
     setIsProcessing(true);
@@ -1254,7 +1276,7 @@ export default function App() {
           onApplyWatermarkRemoval={handleApplyWatermarkRemoval}
           onAutoWatermarkRemoval={handleAutoWatermarkRemoval}
           onApplyPresetCorner={handleApplyPresetCorner}
-          onUpdateBgConfig={(cfg) => setBgConfig((prev) => ({ ...prev, ...cfg }))}
+          onUpdateBgConfig={handleUpdateBgConfig}
           onUploadBgImage={handleUploadBgImage}
           onTriggerCutoutIfNeeded={handleApplyCutout}
           onUpdateAdjustments={(adj) => setAdjustments((prev) => ({ ...prev, ...adj }))}
