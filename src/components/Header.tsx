@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Undo2,
   Redo2,
@@ -9,12 +9,9 @@ import {
   SplitSquareVertical,
   Image as ImageIcon,
   Sparkles,
-  Upload,
   RefreshCw,
   Layers,
   Home,
-  FileCode2,
-  Loader2,
 } from "lucide-react";
 
 interface HeaderProps {
@@ -34,7 +31,6 @@ interface HeaderProps {
   onZoomFit: () => void;
   onToggleCompare: () => void;
   onOpenExport: () => void;
-  onUploadClick: () => void;
   onReset: () => void;
   onGoHome: () => void;
   imageDimensions?: { width: number; height: number };
@@ -57,36 +53,10 @@ export const Header: React.FC<HeaderProps> = ({
   onZoomFit,
   onToggleCompare,
   onOpenExport,
-  onUploadClick,
   onReset,
   onGoHome,
   imageDimensions,
 }) => {
-  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
-
-  const handleDownloadZip = async () => {
-    if (isDownloadingZip) return;
-    try {
-      setIsDownloadingZip(true);
-      const res = await fetch("/api/export-project-zip");
-      if (!res.ok) throw new Error("下载服务异常: " + res.status);
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "remix-photo-editor-project.zip";
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err: any) {
-      console.error("ZIP download failed:", err);
-      alert("ZIP 下载失败：" + (err?.message || "网络错误，请稍后重试"));
-    } finally {
-      setIsDownloadingZip(false);
-    }
-  };
-
   return (
     <header
       id="app-header"
@@ -213,33 +183,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>回首页</span>
           </button>
         )}
-
-        {/* Export Project Source Code ZIP */}
-        <button
-          id="btn-download-project-zip"
-          onClick={handleDownloadZip}
-          disabled={isDownloadingZip}
-          title="一键打包导出全部源码 (ZIP压缩包，可直接在 VSCode / Cursor / Codex / 其他AI 中打开)"
-          className="px-2.5 py-1.5 text-xs rounded-lg bg-indigo-950/70 hover:bg-indigo-900 text-indigo-300 hover:text-indigo-100 border border-indigo-500/40 flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
-        >
-          {isDownloadingZip ? (
-            <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-          ) : (
-            <FileCode2 className="w-3.5 h-3.5 text-indigo-400" />
-          )}
-          <span className="font-medium">
-            {isDownloadingZip ? "正在打包ZIP..." : "导出源码ZIP"}
-          </span>
-        </button>
-
-        <button
-          id="btn-new-upload"
-          onClick={onUploadClick}
-          className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors"
-        >
-          <Upload className="w-3.5 h-3.5" />
-          <span>{hasImage ? "换张图片" : "导入图片"}</span>
-        </button>
 
         {hasImage && (
           <button

@@ -1141,7 +1141,6 @@ export default function App() {
         onZoomFit={handleZoomFit}
         onToggleCompare={() => setIsCompareActive((prev) => !prev)}
         onOpenExport={() => setIsExportOpen(true)}
-        onUploadClick={() => hiddenFileInputRef.current?.click()}
         onGoHome={handleGoHome}
         onReset={() => {
           if (originalImageUrl) {
