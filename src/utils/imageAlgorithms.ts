@@ -102,9 +102,69 @@ export async function removeBackgroundSmart(
       semanticMask.height = height;
       const semanticMaskCtx = semanticMask.getContext("2d")!;
       const semanticMaskPixels = semanticMaskCtx.createImageData(width, height);
+
+      // IS-Net can assign zero confidence to an entire pale sleeve or a raised
+      // arm separated from the torso. Build a conservative colour-edge mask
+      // and use it only to restore *components that overlap the semantic
+      // subject*. This recovers omitted limbs/clothes from original pixels
+      // without bringing isolated background regions back.
+      onProgress?.("正在核对并找回被误删的手臂、衣袖与主体细节...");
+      const recoveryResult = await removeBackgroundSmart(imageSource, {
+        sensitivity,
+        featherRadius: 0,
+        edgeExpansion: 0,
+        useAiServer: false,
+      });
+      const recoveryMaskImg = await resolveImage(recoveryResult.maskDataUrl);
+      const recoveryCanvas = document.createElement("canvas");
+      recoveryCanvas.width = width;
+      recoveryCanvas.height = height;
+      const recoveryCtx = recoveryCanvas.getContext("2d", { willReadFrequently: true })!;
+      recoveryCtx.drawImage(recoveryMaskImg, 0, 0, width, height);
+      const recoveryPixels = recoveryCtx.getImageData(0, 0, width, height).data;
+      const total = width * height;
+      const visited = new Uint8Array(total);
+      const recoverable = new Uint8Array(total);
+
+      for (let seed = 0; seed < total; seed++) {
+        if (visited[seed] || recoveryPixels[seed * 4] < 224) continue;
+        const component: number[] = [];
+        const queue = [seed];
+        visited[seed] = 1;
+        let head = 0;
+        let overlapsSemanticSubject = false;
+        while (head < queue.length) {
+          const idx = queue[head++];
+          component.push(idx);
+          if (semanticPixels.data[idx * 4 + 3] >= 96) overlapsSemanticSubject = true;
+          const x = idx % width;
+          const y = Math.floor(idx / width);
+          const neighbours = [
+            x > 0 ? idx - 1 : -1,
+            x + 1 < width ? idx + 1 : -1,
+            y > 0 ? idx - width : -1,
+            y + 1 < height ? idx + width : -1,
+          ];
+          for (const next of neighbours) {
+            if (next >= 0 && !visited[next] && recoveryPixels[next * 4] >= 224) {
+              visited[next] = 1;
+              queue.push(next);
+            }
+          }
+        }
+        if (overlapsSemanticSubject) {
+          for (const idx of component) recoverable[idx] = 1;
+        }
+      }
+
       for (let i = 0; i < width * height; i++) {
         const p = i * 4;
-        const alpha = semanticPixels.data[p + 3];
+        const semanticAlpha = semanticPixels.data[p + 3];
+        // Preserve good semantic soft edges. Only replace pixels that the
+        // model made virtually transparent inside a verified subject region.
+        const alpha = semanticAlpha < 24 && recoverable[i]
+          ? recoveryPixels[p]
+          : semanticAlpha;
         originalPixels.data[p + 3] = alpha;
         semanticMaskPixels.data[p] = alpha;
         semanticMaskPixels.data[p + 1] = alpha;
