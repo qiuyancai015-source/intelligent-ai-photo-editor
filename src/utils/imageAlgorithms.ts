@@ -61,7 +61,9 @@ export async function removeBackgroundSmart(
         // Host the compact model with the app. The previous 88 MB model was
         // fetched from a third-party CDN that is unreachable on some networks.
         publicPath: localModelPath,
-        model: "isnet_quint8",
+        // FP16 preserves fine knit fibres and dark/red shoe edges much better
+        // than the compact quantized model, while still being self-hosted.
+        model: "isnet_fp16",
         device: "cpu",
         progress: (key: string, current: number, total: number) => {
           if (key.startsWith("fetch:") && total > 0) {
