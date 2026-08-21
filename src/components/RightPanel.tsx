@@ -46,7 +46,6 @@ interface RightPanelProps {
   onUpdateWatermarkConfig: (cfg: Partial<WatermarkConfig>) => void;
   onUpdateAddWatermarkConfig: (cfg: AddWatermarkConfig | ((prev: AddWatermarkConfig) => AddWatermarkConfig)) => void;
   onApplyWatermarkRemoval: () => void;
-  onAutoWatermarkRemoval: () => void;
   onApplyPresetCorner: (corner: "bottom-right" | "bottom-left" | "top-right" | "top-left" | "center", instantRemove?: boolean) => void;
   onUpdateBgConfig: (cfg: Partial<BgConfig>) => void;
   onUploadBgImage: (file: File) => void;
@@ -97,7 +96,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onUpdateWatermarkConfig,
   onUpdateAddWatermarkConfig,
   onApplyWatermarkRemoval,
-  onAutoWatermarkRemoval,
   onApplyPresetCorner,
   onUpdateBgConfig,
   onUploadBgImage,
@@ -172,7 +170,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           aiAnalysis={aiAnalysis}
           onUpdateWatermarkConfig={onUpdateWatermarkConfig}
           onApplyWatermarkRemoval={onApplyWatermarkRemoval}
-          onAutoWatermarkRemoval={onAutoWatermarkRemoval}
           onApplyPresetCorner={onApplyPresetCorner}
           onClearMask={onClearMask}
         />

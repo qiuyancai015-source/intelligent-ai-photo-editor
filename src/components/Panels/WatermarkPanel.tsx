@@ -9,7 +9,6 @@ interface WatermarkPanelProps {
   aiAnalysis: AiAnalysisResult | null;
   onUpdateWatermarkConfig: (cfg: Partial<WatermarkConfig>) => void;
   onApplyWatermarkRemoval: () => void;
-  onAutoWatermarkRemoval: () => void;
   onApplyPresetCorner: (corner: "bottom-right" | "bottom-left" | "top-right" | "top-left" | "center", instantRemove?: boolean) => void;
   onClearMask: () => void;
 }
@@ -21,7 +20,6 @@ export const WatermarkPanel: React.FC<WatermarkPanelProps> = ({
   aiAnalysis,
   onUpdateWatermarkConfig,
   onApplyWatermarkRemoval,
-  onAutoWatermarkRemoval,
   onApplyPresetCorner,
   onClearMask,
 }) => {
@@ -43,18 +41,8 @@ export const WatermarkPanel: React.FC<WatermarkPanelProps> = ({
         </p>
       </div>
 
-      {/* Main Action Button */}
+      {/* Apply the user's manual mask */}
       <div className="space-y-2">
-        <button
-          id="btn-auto-detect-remove-watermark"
-          onClick={onAutoWatermarkRemoval}
-          disabled={isProcessing}
-          className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-violet-600 via-cyan-500 to-emerald-500 hover:brightness-110 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
-        >
-          <Zap className="w-4 h-4" />
-          <span>一键识别并去除全图水印</span>
-        </button>
-        <p className="text-[10px] text-slate-500 text-center">适合重复平铺、半透明文字和斜纹水印</p>
         <button
           id="btn-apply-watermark-removal"
           onClick={onApplyWatermarkRemoval}

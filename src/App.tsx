@@ -23,7 +23,6 @@ import {
   removeBackgroundSmart,
   inpaintArea,
   updateCutoutEdges,
-  detectRepeatedWatermarkMask,
   cropImageByRect,
   applyAdjustmentsAndFilters,
   renderCompositeCanvas,
@@ -522,29 +521,6 @@ export default function App() {
       clearMaskCanvas();
     } catch (err) {
       console.error("Watermark removal error:", err);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleAutoWatermarkRemoval = async () => {
-    if (!baseWorkingImageUrl) return;
-    const editingCutout = cutoutConfig.isCutoutActive && !!cutoutDataUrl;
-    const source = editingCutout ? cutoutDataUrl! : baseWorkingImageUrl;
-    setIsProcessing(true);
-    setProcessingText("正在识别水印文字，仅在检测 mask 内复用周边原有纹理...");
-    try {
-      const autoMask = await detectRepeatedWatermarkMask(source);
-      const cleaned = await inpaintArea(source, autoMask, { iterations: 5, patchRadius: 20 });
-      if (editingCutout) {
-        setCutoutDataUrl(cleaned);
-        pushHistorySnapshot("一键识别并去除全图水印", { cutoutDataUrl: cleaned, cutoutConfig });
-      } else {
-        setBaseWorkingImageUrl(cleaned);
-        pushHistorySnapshot("一键识别并去除全图水印", { baseWorkingImageUrl: cleaned });
-      }
-    } catch (err) {
-      console.error("Auto watermark removal error:", err);
     } finally {
       setIsProcessing(false);
     }
@@ -1284,7 +1260,6 @@ export default function App() {
           onUpdateWatermarkConfig={(cfg) => setWatermarkConfig((prev) => ({ ...prev, ...cfg }))}
           onUpdateAddWatermarkConfig={setAddWatermarkConfig}
           onApplyWatermarkRemoval={handleApplyWatermarkRemoval}
-          onAutoWatermarkRemoval={handleAutoWatermarkRemoval}
           onApplyPresetCorner={handleApplyPresetCorner}
           onUpdateBgConfig={handleUpdateBgConfig}
           onUploadBgImage={handleUploadBgImage}
