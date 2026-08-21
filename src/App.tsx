@@ -153,6 +153,12 @@ export default function App() {
   // Undo / Redo History Stack (Full State Snapshots)
   const [history, setHistory] = useState<HistorySnapshot[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  // Keep the stack/index in refs as well as state. Several tools can finish in
+  // quick succession, and relying on a closed-over historyIndex would make
+  // each new snapshot slice from the same old position (collapsing undo to the
+  // first edit).
+  const historyRef = useRef<HistorySnapshot[]>([]);
+  const historyIndexRef = useRef(-1);
 
   // Mask drawing canvas ref
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -181,18 +187,17 @@ export default function App() {
         ...overrides,
       };
 
-      setHistory((prev) => {
-        const upToCurrent = prev.slice(0, historyIndex + 1);
-        const newStack = [...upToCurrent, snapshot];
-        if (newStack.length > 30) {
-          return newStack.slice(newStack.length - 30);
-        }
-        return newStack;
-      });
-      setHistoryIndex((prev) => Math.min(prev + 1, 29));
+      const upToCurrent = historyRef.current.slice(0, historyIndexRef.current + 1);
+      const appended = [...upToCurrent, snapshot];
+      const newStack = appended.length > 30 ? appended.slice(-30) : appended;
+      const newIndex = newStack.length - 1;
+
+      historyRef.current = newStack;
+      historyIndexRef.current = newIndex;
+      setHistory(newStack);
+      setHistoryIndex(newIndex);
     },
     [
-      historyIndex,
       baseWorkingImageUrl,
       cutoutDataUrl,
       cutoutConfig,
@@ -250,6 +255,8 @@ export default function App() {
           imageDimensions: dims,
         };
 
+        historyRef.current = [initialSnapshot];
+        historyIndexRef.current = 0;
         setHistory([initialSnapshot]);
         setHistoryIndex(0);
         setIsProcessing(false);
@@ -936,6 +943,7 @@ export default function App() {
       const snap = history[prevIdx];
       if (snap) {
         setHistoryIndex(prevIdx);
+        historyIndexRef.current = prevIdx;
         setBaseWorkingImageUrl(snap.baseWorkingImageUrl);
         setCutoutDataUrl(snap.cutoutDataUrl);
         setCutoutConfig(snap.cutoutConfig);
@@ -957,6 +965,7 @@ export default function App() {
       const snap = history[nextIdx];
       if (snap) {
         setHistoryIndex(nextIdx);
+        historyIndexRef.current = nextIdx;
         setBaseWorkingImageUrl(snap.baseWorkingImageUrl);
         setCutoutDataUrl(snap.cutoutDataUrl);
         setCutoutConfig(snap.cutoutConfig);
@@ -1077,6 +1086,8 @@ export default function App() {
     setSelectedElement(null);
     setAddWatermarkConfig(DEFAULT_ADD_WATERMARK_CONFIG);
     clearMaskCanvas();
+    historyRef.current = [];
+    historyIndexRef.current = -1;
     setHistory([]);
     setHistoryIndex(-1);
     setHasDrawnMask(false);
