@@ -234,7 +234,14 @@ export default function App() {
   );
 
   // Load a new image file
-  const handleLoadImage = (fileOrUrl: File | string, titleHint?: string) => {
+  const handleLoadImage = (
+    fileOrUrl: File | string,
+    titleHint?: string,
+    initialTool: ToolMode = "cutout"
+  ) => {
+    // Every ordinary upload starts a fresh workflow in One-click Cutout.
+    // Samples may explicitly provide their recommended tool instead.
+    setActiveTool(initialTool);
     setIsProcessing(true);
     setProcessingText("正在导入图片并校准色彩通道...");
 
@@ -1244,8 +1251,7 @@ export default function App() {
           onClearImage={handleGoHome}
           onFileUpload={handleLoadImage}
           onSelectSample={(sample: SampleImage) => {
-            handleLoadImage(sample.url, sample.title);
-            setActiveTool(sample.recommendedTool);
+            handleLoadImage(sample.url, sample.title, sample.recommendedTool);
           }}
         />
 
@@ -1317,8 +1323,7 @@ export default function App() {
       <BottomBar
         hasImage={!!displayImageUrl}
         onSelectSample={(sample: SampleImage) => {
-          handleLoadImage(sample.url, sample.title);
-          setActiveTool(sample.recommendedTool);
+          handleLoadImage(sample.url, sample.title, sample.recommendedTool);
         }}
         activeToolName={toolNameMap[activeTool] || "修图"}
       />
